@@ -18,6 +18,8 @@
 
 #include <linux/init.h>
 #include <linux/fs.h>
+#include <linux/slab.h>
+#include <asm/uaccess.h>
 
 static ssize_t ipcdevice_read(struct file *file, char __user *buf,
         size_t count, loff_t *ppos){
@@ -27,9 +29,16 @@ static ssize_t ipcdevice_read(struct file *file, char __user *buf,
 static ssize_t ipcdevice_write(struct file *file, const char __user *buf,
         size_t count, loff_t *ppos){
     int i;
-    for( i=0; i<count; i++ ){
-        printk( "<1>%c", buf[i] );
-    }
+    char *blackboard;
+
+    blackboard = kmalloc(count, GFP_KERNEL);
+    if (blackboard == NULL)
+        return -ENOMEM;
+    copy_from_user(blackboard,buf,count);
+    blackboard[count-1] = 0;
+
+    printk( KERN_INFO "%s\n", blackboard );
+    kfree(blackboard);
     return count;
 }
 
