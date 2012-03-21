@@ -36,24 +36,50 @@
 #include <linux/init.h>
 #include <linux/fs.h>
 #include <linux/slab.h>
+#include <linux/sched.h>
 #include <asm/uaccess.h>
 
 static char *blackboard;
 static const int bb_size = 4096;
+DECLARE_WAIT_QUEUE_HEAD (bbq_read);
 
+int ipcdevice_open(struct inode*, struct file*);
+int ipcdevice_release(struct inode*, struct file*);
 static ssize_t ipcdevice_read(struct file*, char __user*, size_t, loff_t*);
 static ssize_t ipcdevice_write(struct file*, const char __user*, size_t, loff_t*);
 
 const struct file_operations ipcdevice_fops = {
+    .open  = ipcdevice_open,
+    .release = ipcdevice_release,
     .read  = ipcdevice_read,
     .write = ipcdevice_write,
 };
 
+int ipcdevice_open(struct inode *inode, struct file *filp)
+{
+    return 0;
+}
+
+int ipcdevice_release(struct inode *inode, struct file *filp)
+{
+    return 0;
+}
+
 static ssize_t ipcdevice_read(struct file *file, char __user *buf,
         size_t count, loff_t *ppos){
     const size_t len = strnlen(blackboard, bb_size) + 1;
+    int result;
     int to_end;
     size_t to_read;
+
+    if( blackboard[0] == 0 ){
+        //pipe isn't ready
+        if (file->f_flags & O_NONBLOCK)
+            return -EAGAIN;
+        result = wait_event_interruptible(bbq_read, (blackboard[0] != 0) );
+        if( result != 0 )
+            return result;
+    }
 
     to_end = len-(int)*ppos;
     to_end = to_end > 0 ? to_end : 0;
@@ -73,6 +99,7 @@ static ssize_t ipcdevice_write(struct file *file, const char __user *buf,
     }
     copy_from_user(blackboard,buf,count);
     blackboard[count-1+null_term_offset] = 0;
+    wake_up_interruptible_sync(&bbq_read);
 
     return count;
 }

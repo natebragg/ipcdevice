@@ -19,5 +19,8 @@ test: ipcdevice.ko test.o
 	./test
 	sudo rmmod ipcdevice
 
+demo_p_c: demo_p_c.o
+	gcc -o demo_p_c demo_p_c.o
+
 clean:
-	rm -f *.o *.ko *.mod.c test modules.order Module.symvers
+	rm -f *.o *.ko *.mod.c test demo_p_c modules.order Module.symvers
