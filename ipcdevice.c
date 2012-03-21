@@ -23,12 +23,23 @@
 
 static ssize_t ipcdevice_read(struct file *file, char __user *buf,
         size_t count, loff_t *ppos){
-    return 0;
+    const char *test_buf = "excelsior!";
+    const int len = 11;
+    int to_end;
+    size_t to_read;
+
+    to_end = len-(int)*ppos;
+    to_end = to_end > 0 ? to_end : 0;
+    to_read = (to_end >= count) ? count : to_end;
+    if ( to_read == 0 )
+        return 0;
+    copy_to_user(buf, test_buf+*ppos, to_read);
+    *ppos += to_read;
+    return to_read;
 }
 
 static ssize_t ipcdevice_write(struct file *file, const char __user *buf,
         size_t count, loff_t *ppos){
-    int i;
     char *blackboard;
 
     blackboard = kmalloc(count, GFP_KERNEL);
