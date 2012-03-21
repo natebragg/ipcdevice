@@ -1,4 +1,5 @@
 # Compiled Sources
+.*
 *.ko
 *.mod.c
 *.o
