@@ -2,16 +2,22 @@ obj-m := ipcdevice.o
 KDIR := /usr/src/linux-headers-$(shell uname -r)
 PWD := $(shell pwd)
 
+.PHONY: default clean
+
 default: ipcdevice.ko
 
 ipcdevice.ko: ipcdevice.c
 	$(MAKE) -C $(KDIR) M=$(PWD) modules
 
 test: ipcdevice.ko test.o
-	gcc -o ipcdevice_test test.o
+	gcc -o test test.o
+	@lsmod | grep ipcdevice > /dev/null; \
+	if [ $$? -eq 0 ]; then \
+		sudo rmmod ipcdevice; \
+	fi;
 	sudo insmod ipcdevice.ko
-	./ipcdevice_test
+	./test
 	sudo rmmod ipcdevice
 
 clean:
-	rm *.o *.ko *.mod.c ipcdevice_test modules.order Module.symvers
+	rm -f *.o *.ko *.mod.c test modules.order Module.symvers
