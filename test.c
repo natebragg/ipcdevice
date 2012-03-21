@@ -6,14 +6,14 @@
 #include <stdio.h>
 #include <string.h>
 
-#define ASSERT_EQ( p1, p2 ) do{ if ((p1) != (p2)) { printf("ASSERT FAILED: " # p1 " does not equal " # p2 "\n\t" # p1 " = %d\n\t" # p2 " = %d\n", (int)p1, (int)p2 ); result += 1; } }while(0)
-#define ASSERT_NEQ( p1, p2 ) do{ if ((p1) == (p2)) { printf("ASSERT FAILED: " # p1 " equals " # p2 "\n\t" # p1 " = %d\n\t" # p2 " = %d\n", (int)p1, (int)p2 ); result += 1; } }while(0)
+#define ASSERT_EQ( p1, p2 ) do{ if ((p1) != (p2)) { printf("ASSERT FAILED(%d): " # p1 " does not equal " # p2 "\n\t" # p1 " = %d\n\t" # p2 " = %d\n", __LINE__, (int)p1, (int)p2 ); result += 1; } }while(0)
+#define ASSERT_NEQ( p1, p2 ) do{ if ((p1) == (p2)) { printf("ASSERT FAILED(%d): " # p1 " equals " # p2 "\n\t" # p1 " = %d\n\t" # p2 " = %d\n", __LINE__, (int)p1, (int)p2 ); result += 1; } }while(0)
 
 int test_multi_read()
 {
     FILE *ipc = NULL;
     char *message, *m_cursor;
-    const char *expected = "excelsior!";
+    const char *expected = "shmowzow!";
     size_t buf_size, bytes_read;
     size_t total_bytes_read = 0;
     int result = 0;
@@ -41,7 +41,7 @@ int test_single_read()
 {
     FILE *ipc = NULL;
     char *message;
-    const char *expected = "excelsior!";
+    const char *expected = "shmowzow!";
     size_t buf_size, bytes_read;
     int result = 0;
 

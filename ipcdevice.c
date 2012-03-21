@@ -9,6 +9,8 @@
  * Afterwards, to use:
  *
  * insmod ipcdevice.ko
+ * echo some text > /dev/ipcdevice
+ * cat /dev/ipcdevice
  * rmmod ipcdevice
  */
 #define IPC_MAJOR 42
@@ -21,10 +23,20 @@
 #include <linux/slab.h>
 #include <asm/uaccess.h>
 
+static char *blackboard;
+static const int bb_size = 4096;
+
+static ssize_t ipcdevice_read(struct file*, char __user*, size_t, loff_t*);
+static ssize_t ipcdevice_write(struct file*, const char __user*, size_t, loff_t*);
+
+const struct file_operations ipcdevice_fops = {
+    .read  = ipcdevice_read,
+    .write = ipcdevice_write,
+};
+
 static ssize_t ipcdevice_read(struct file *file, char __user *buf,
         size_t count, loff_t *ppos){
-    const char *test_buf = "excelsior!";
-    const int len = 11;
+    const size_t len = strnlen(blackboard, bb_size) + 1;
     int to_end;
     size_t to_read;
 
@@ -33,30 +45,22 @@ static ssize_t ipcdevice_read(struct file *file, char __user *buf,
     to_read = (to_end >= count) ? count : to_end;
     if ( to_read == 0 )
         return 0;
-    copy_to_user(buf, test_buf+*ppos, to_read);
+    copy_to_user(buf, blackboard+*ppos, to_read);
     *ppos += to_read;
     return to_read;
 }
 
 static ssize_t ipcdevice_write(struct file *file, const char __user *buf,
         size_t count, loff_t *ppos){
-    char *blackboard;
-
-    blackboard = kmalloc(count, GFP_KERNEL);
-    if (blackboard == NULL)
-        return -ENOMEM;
+    size_t null_term_offset = buf[count-1] == 0 ? 0 : 1;
+    if( count+null_term_offset > bb_size ){
+        return 0;
+    }
     copy_from_user(blackboard,buf,count);
-    blackboard[count-1] = 0;
+    blackboard[count-1+null_term_offset] = 0;
 
-    printk( KERN_INFO "%s\n", blackboard );
-    kfree(blackboard);
     return count;
 }
-
-const struct file_operations ipcdevice_fops = {
-    .read  = ipcdevice_read,
-    .write = ipcdevice_write,
-};
 
 int __init ipcdevice_init(void){
     int result;
@@ -67,11 +71,22 @@ int __init ipcdevice_init(void){
             IPC_MAJOR );
         return result;
     }
+
+    blackboard = kmalloc(bb_size, GFP_KERNEL);
+    if (blackboard == NULL){
+        unregister_chrdev(IPC_MAJOR, IPC_NAME);
+        return -ENOMEM;
+    }
+    blackboard[0] = 0;
     return 0;
 }
 
 void __exit ipcdevice_exit(void){
     unregister_chrdev(IPC_MAJOR, IPC_NAME);
+
+    if( blackboard != NULL ){
+        kfree(blackboard);
+    }
 }
 
 module_init(ipcdevice_init);
