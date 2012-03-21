@@ -1,0 +1,8 @@
+# Compiled Sources
+*.ko
+*.mod.c
+*.o
+
+# Top-level generic files
+/modules.order
+/Module.symvers

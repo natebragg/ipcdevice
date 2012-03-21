@@ -1,0 +1,10 @@
+The goal of this project is to:
+
+Implement a Linux kernel character device driver to pass messages between two
+processes.  The message passing should be bi-directional.  Also implement a
+series of ioctls that can transform the messages as they pass through the
+kernel:
+
+1) An ioctl to ROT13 encode the message.
+2) An ioctl to base64 encode the message.
+3) An ioctl to reverse the message.
