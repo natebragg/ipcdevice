@@ -91,11 +91,44 @@ int test_write()
     return result;
 }
 
+int test_corpus(const char *fname)
+{
+    FILE *ipc = NULL;
+    FILE *corpus = NULL;
+    #define buf_size 1024
+    char message[buf_size] = {0,}, expected[buf_size] = {0};
+    size_t len, bytes_written, bytes_read, bytes_retrieved;
+    int result = 0;
+
+    corpus = fopen(fname, "r");
+    ASSERT_NEQ( corpus, NULL );
+
+    ipc = fopen("/dev/ipcdevice","r+");
+    ASSERT_NEQ( ipc, NULL );
+    do{
+        bytes_read = fread(message, sizeof(char), buf_size, corpus);
+        bytes_written = fwrite(message, sizeof(char), bytes_read, ipc);
+        ASSERT_EQ( bytes_written, bytes_read );
+    }while( !feof( corpus ) );
+
+    rewind( corpus );
+    do{
+        bytes_read = fread(expected, sizeof(char), buf_size, corpus);
+        bytes_retrieved = fread(message, sizeof(char), buf_size, ipc);
+        ASSERT_STR_EQ( message, expected, buf_size );
+    }while( !feof( corpus ) );
+
+    fclose( ipc );
+    fclose( corpus );
+    return result;
+}
+
 int main(int argv, char **argc){
     int result = 0;
     result += test_write();
     result += test_single_read();
     result += test_write();
     result += test_multi_read();
+    result += test_corpus("corpora/lipsum_small");
     return result;
 }
