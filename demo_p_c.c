@@ -43,14 +43,16 @@ void consumer(int msg_cnt){
     }
 
     do{
-        bytes_read = fread(message, sizeof(char), BUF_SIZE, ipc);
-        br_total += bytes_read;
-        while( message[br_total-1] != 0 && br_total != BUF_SIZE){
-            bytes_read = fread(message+br_total, sizeof(char), BUF_SIZE-br_total, ipc);
-            br_total += bytes_read;
-        }
-        message[br_total-1] = 0;
-        printf( PROC_NAME ": read '%s'\n", message );
+        printf( PROC_NAME ": read '" );
+        do{
+            br_total = 0;
+            do{
+                bytes_read = fread(message+br_total, sizeof(char), BUF_SIZE-br_total, ipc);
+                br_total += bytes_read;
+            }while( message[br_total-1] != 0 && br_total != BUF_SIZE );
+            printf( "%.*s", br_total, message);
+        }while( message[br_total-1] != 0 );
+        printf( "'\n" );
         br_total = 0;
     } while( --msg_cnt > 0 );
 

@@ -41,7 +41,7 @@
 #include <asm/uaccess.h>
 
 static char *blackboard, *bb_rhead, *bb_whead;
-static const int BB_SIZE = 4096;
+static const int BB_SIZE = 1024;// 4096;
 DECLARE_WAIT_QUEUE_HEAD (bbq_read);
 DECLARE_WAIT_QUEUE_HEAD (bbq_write);
 
@@ -54,8 +54,8 @@ inline unsigned int _min(unsigned int a, unsigned int b){
     return (a<b)?a:b;
 }
 
-inline unsigned int _max(unsigned int a, unsigned int b){
-    return (a>b)?a:b;
+inline char *circ_buf_offset(char *buf, char *basis, const size_t offset, const size_t size){
+    return basis + ((buf - basis + offset) % size);
 }
 
 const struct file_operations ipcdevice_fops = {
@@ -77,25 +77,41 @@ int ipcdevice_release(struct inode *inode, struct file *file)
 
 static ssize_t ipcdevice_read(struct file *file, char __user *buf,
         size_t count, loff_t *ppos){
-    const size_t len = strnlen(blackboard, BB_SIZE) + 1;
     int result;
-    size_t to_read;
+    size_t len = 0, to_read = 0, head_space = 0, bytes_read = 0, to_bb_end = 0;
 
-    if( blackboard[0] == 0 ){
-        //pipe isn't ready
-        if (file->f_flags & O_NONBLOCK)
-            return -EAGAIN;
-        result = wait_event_interruptible(bbq_read, (blackboard[0] != 0) );
-        if( result != 0 )
-            return result;
+    if( bb_rhead != bb_whead && *bb_rhead == 0 ){
+        bb_rhead = blackboard + ((bb_rhead - blackboard + 1) % BB_SIZE);
+        return 0;
     }
 
-    to_read = _min(_max(len-(int)*ppos, 0), count);
-    if ( to_read == 0 )
-        return 0;
-    copy_to_user(buf, blackboard+*ppos, to_read);
-    *ppos += to_read;
-    return to_read;
+    do{
+        if(bb_rhead == bb_whead){
+            wake_up_interruptible_sync(&bbq_write);
+            result = wait_event_interruptible(bbq_read, (bb_rhead != bb_whead) );
+            if( result != 0 )
+                return result;
+        }
+
+        //we can read all the way to bb_whead, circularly
+        head_space = (BB_SIZE + (bb_whead - bb_rhead)) % BB_SIZE;
+        to_bb_end = BB_SIZE-(bb_rhead-blackboard);
+        len = strnlen(bb_rhead, _min(head_space, to_bb_end));
+        to_read = _min(head_space, _min(to_bb_end, _min(len, count)));
+        copy_to_user(buf+bytes_read, bb_rhead, to_read);
+        bb_rhead = circ_buf_offset(bb_rhead, blackboard, to_read, BB_SIZE);
+        bytes_read += to_read;
+        count -= to_read;
+    }while( count > 0 && (*bb_rhead != 0 || bb_rhead == bb_whead) );
+
+    if( count > 0 ){
+        *(buf+bytes_read) = 0;
+        bytes_read++;
+    }
+    wake_up_interruptible_sync(&bbq_write);
+
+    *ppos = (bb_rhead-blackboard);
+    return bytes_read;
 }
 
 static ssize_t ipcdevice_write(struct file *file, const char __user *buf,
@@ -105,26 +121,32 @@ static ssize_t ipcdevice_write(struct file *file, const char __user *buf,
     int result = 0;
 
     while( count > 0 ){
-        result = wait_event_interruptible(bbq_write, (bb_rhead != bb_whead+1) );
-        if( result != 0 )
-            return result;
+        if(bb_rhead == circ_buf_offset(bb_whead, blackboard, 1, BB_SIZE)){
+            wake_up_interruptible_sync(&bbq_read);
+            result = wait_event_interruptible(bbq_write, (bb_rhead != circ_buf_offset(bb_whead, blackboard, 1, BB_SIZE)) );
+            if( result != 0 )
+                return result;
+        }
 
         //we can write all the way up to bb_rhead, circularly
         head_space = (BB_SIZE + (bb_rhead - bb_whead) - 1) % BB_SIZE;
         to_write = _min(head_space, _min(BB_SIZE-(bb_whead-blackboard), count));
         copy_from_user(bb_whead, buf+written, to_write);
-        bb_whead = blackboard + ((bb_whead - blackboard + to_write) % BB_SIZE);
+        bb_whead = circ_buf_offset(bb_whead, blackboard, to_write, BB_SIZE);
         written += to_write;
         count -= to_write;
     }
     if( null_term_offset > 0){
-        result = wait_event_interruptible(bbq_write, (bb_rhead != bb_whead+1) );
-        if( result != 0 )
-            return result;
+        if(bb_rhead == circ_buf_offset(bb_whead, blackboard, 1, BB_SIZE)){
+            wake_up_interruptible_sync(&bbq_read);
+            result = wait_event_interruptible(bbq_write, (bb_rhead != circ_buf_offset(bb_whead, blackboard, 1, BB_SIZE)) );
+            if( result != 0 )
+                return result;
+        }
 
         //Counting this towards written would throw off the writer, so don't.
         *bb_whead = 0;
-        bb_whead = blackboard + ((bb_whead - blackboard + null_term_offset) % BB_SIZE);
+        bb_whead = circ_buf_offset(bb_whead, blackboard, null_term_offset, BB_SIZE);
     }
     wake_up_interruptible_sync(&bbq_read);
 
