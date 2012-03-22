@@ -22,6 +22,7 @@
 
 #define ASSERT_EQ( p1, p2 ) do{ if ((p1) != (p2)) { printf("ASSERT FAILED(%d): " # p1 " does not equal " # p2 "\n\t" # p1 " = %d\n\t" # p2 " = %d\n", __LINE__, (int)p1, (int)p2 ); result += 1; } }while(0)
 #define ASSERT_NEQ( p1, p2 ) do{ if ((p1) == (p2)) { printf("ASSERT FAILED(%d): " # p1 " equals " # p2 "\n\t" # p1 " = %d\n\t" # p2 " = %d\n", __LINE__, (int)p1, (int)p2 ); result += 1; } }while(0)
+#define ASSERT_STR_EQ( p1, p2, bsize ) do{ if ( strncmp(p1, p2, bsize) ) { printf("ASSERT FAILED(%d): " # p1 " != " # p2 "\n\t" # p1 " = %.*s\n\t" # p2 " = %.*s\n", __LINE__, bsize, p1, bsize, p2 ); result += 1; } }while(0)
 
 int test_multi_read()
 {
@@ -45,7 +46,7 @@ int test_multi_read()
     }
     
     ASSERT_EQ( strnlen(expected, buf_size) + 1, total_bytes_read );
-    ASSERT_EQ( strncmp(message, expected, buf_size ), 0 );
+    ASSERT_STR_EQ( message, expected, buf_size );
     fclose( ipc );
     free( message );
     return result;
@@ -67,7 +68,7 @@ int test_single_read()
     ASSERT_NEQ( ipc, NULL );
     bytes_read = fread(message, sizeof(char), buf_size, ipc);
     ASSERT_EQ( strnlen(expected, buf_size) + 1, bytes_read );
-    ASSERT_EQ( strncmp(message, expected, buf_size ), 0 );
+    ASSERT_STR_EQ( message, expected, buf_size );
     fclose( ipc );
     free( message );
     return result;
@@ -94,6 +95,7 @@ int main(int argv, char **argc){
     int result = 0;
     result += test_write();
     result += test_single_read();
+    result += test_write();
     result += test_multi_read();
     return result;
 }
