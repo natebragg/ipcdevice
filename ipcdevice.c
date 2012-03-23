@@ -40,10 +40,29 @@
 #include <linux/wait.h>
 #include <asm/uaccess.h>
 
-static char *blackboard, *bb_rhead, *bb_whead;
-static const int BB_SIZE = 1024;// 4096;
-DECLARE_WAIT_QUEUE_HEAD (bbq_read);
-DECLARE_WAIT_QUEUE_HEAD (bbq_write);
+struct simplexinfo{
+    char *cbuf, *rhead, *whead;
+    const int SIZE;
+    wait_queue_head_t rq;
+    wait_queue_head_t wq;
+};
+
+struct duplexinfo{
+    int parties;
+    struct simplexinfo a;
+    struct simplexinfo b;
+} pipe = {
+    .parties = 0,
+    .a = {
+        .SIZE = 1024,
+        },
+    .b = {
+        .SIZE = 1024,
+        },
+};
+
+int simplexinfo_init(struct simplexinfo*);
+void simplexinfo_destroy(struct simplexinfo*);
 
 int ipcdevice_open(struct inode*, struct file*);
 int ipcdevice_release(struct inode*, struct file*);
@@ -65,13 +84,35 @@ const struct file_operations ipcdevice_fops = {
     .write = ipcdevice_write,
 };
 
+int simplexinfo_init(struct simplexinfo *this){
+    this->rhead = this->whead = this->cbuf = kmalloc(this->SIZE, GFP_KERNEL);
+    if (this->cbuf == NULL){
+        return -ENOMEM;
+    }
+    this->cbuf[0] = 0;
+    init_waitqueue_head(&this->rq);
+    init_waitqueue_head(&this->wq);
+    return 0;
+}
+
+void simplexinfo_destroy(struct simplexinfo *this){
+    if( this->cbuf != NULL ){
+        kfree(this->cbuf);
+    }
+}
+
 int ipcdevice_open(struct inode *inode, struct file *file)
 {
+    if( pipe.parties > 1 )
+        return -EBUSY;
+    pipe.parties++;
+    file->private_data = &pipe.a;
     return 0;
 }
 
 int ipcdevice_release(struct inode *inode, struct file *file)
 {
+    pipe.parties--;
     return 0;
 }
 
@@ -79,38 +120,39 @@ static ssize_t ipcdevice_read(struct file *file, char __user *buf,
         size_t count, loff_t *ppos){
     int result;
     size_t len = 0, to_read = 0, head_space = 0, bytes_read = 0, to_bb_end = 0;
+    struct simplexinfo *this = file->private_data;
 
-    if( bb_rhead != bb_whead && *bb_rhead == 0 ){
-        bb_rhead = blackboard + ((bb_rhead - blackboard + 1) % BB_SIZE);
+    if( this->rhead != this->whead && *this->rhead == 0 ){
+        this->rhead = this->cbuf + ((this->rhead - this->cbuf + 1) % this->SIZE);
         return 0;
     }
 
     do{
-        if(bb_rhead == bb_whead){
-            wake_up_interruptible_sync(&bbq_write);
-            result = wait_event_interruptible(bbq_read, (bb_rhead != bb_whead) );
+        if(this->rhead == this->whead){
+            wake_up_interruptible_sync(&this->wq);
+            result = wait_event_interruptible(this->rq, (this->rhead != this->whead) );
             if( result != 0 )
                 return result;
         }
 
-        //we can read all the way to bb_whead, circularly
-        head_space = (BB_SIZE + (bb_whead - bb_rhead)) % BB_SIZE;
-        to_bb_end = BB_SIZE-(bb_rhead-blackboard);
-        len = strnlen(bb_rhead, _min(head_space, to_bb_end));
+        //we can read all the way to whead, circularly
+        head_space = (this->SIZE + (this->whead - this->rhead)) % this->SIZE;
+        to_bb_end = this->SIZE-(this->rhead-this->cbuf);
+        len = strnlen(this->rhead, _min(head_space, to_bb_end));
         to_read = _min(head_space, _min(to_bb_end, _min(len, count)));
-        copy_to_user(buf+bytes_read, bb_rhead, to_read);
-        bb_rhead = circ_buf_offset(bb_rhead, blackboard, to_read, BB_SIZE);
+        copy_to_user(buf+bytes_read, this->rhead, to_read);
+        this->rhead = circ_buf_offset(this->rhead, this->cbuf, to_read, this->SIZE);
         bytes_read += to_read;
         count -= to_read;
-    }while( count > 0 && (*bb_rhead != 0 || bb_rhead == bb_whead) );
+    }while( count > 0 && (*this->rhead != 0 || this->rhead == this->whead) );
 
     if( count > 0 ){
         *(buf+bytes_read) = 0;
         bytes_read++;
     }
-    wake_up_interruptible_sync(&bbq_write);
+    wake_up_interruptible_sync(&this->wq);
 
-    *ppos = (bb_rhead-blackboard);
+    *ppos = (this->rhead-this->cbuf);
     return bytes_read;
 }
 
@@ -119,38 +161,39 @@ static ssize_t ipcdevice_write(struct file *file, const char __user *buf,
     size_t null_term_offset = buf[count-1] == 0 ? 0 : 1;
     size_t to_write = 0, head_space = 0, written = 0;
     int result = 0;
+    struct simplexinfo *this = file->private_data;
 
     while( count > 0 ){
-        if(bb_rhead == circ_buf_offset(bb_whead, blackboard, 1, BB_SIZE)){
-            wake_up_interruptible_sync(&bbq_read);
-            result = wait_event_interruptible(bbq_write, (bb_rhead != circ_buf_offset(bb_whead, blackboard, 1, BB_SIZE)) );
+        if(this->rhead == circ_buf_offset(this->whead, this->cbuf, 1, this->SIZE)){
+            wake_up_interruptible_sync(&this->rq);
+            result = wait_event_interruptible(this->wq, (this->rhead != circ_buf_offset(this->whead, this->cbuf, 1, this->SIZE)) );
             if( result != 0 )
                 return result;
         }
 
-        //we can write all the way up to bb_rhead, circularly
-        head_space = (BB_SIZE + (bb_rhead - bb_whead) - 1) % BB_SIZE;
-        to_write = _min(head_space, _min(BB_SIZE-(bb_whead-blackboard), count));
-        copy_from_user(bb_whead, buf+written, to_write);
-        bb_whead = circ_buf_offset(bb_whead, blackboard, to_write, BB_SIZE);
+        //we can write all the way up to rhead, circularly
+        head_space = (this->SIZE + (this->rhead - this->whead) - 1) % this->SIZE;
+        to_write = _min(head_space, _min(this->SIZE-(this->whead-this->cbuf), count));
+        copy_from_user(this->whead, buf+written, to_write);
+        this->whead = circ_buf_offset(this->whead, this->cbuf, to_write, this->SIZE);
         written += to_write;
         count -= to_write;
     }
     if( null_term_offset > 0){
-        if(bb_rhead == circ_buf_offset(bb_whead, blackboard, 1, BB_SIZE)){
-            wake_up_interruptible_sync(&bbq_read);
-            result = wait_event_interruptible(bbq_write, (bb_rhead != circ_buf_offset(bb_whead, blackboard, 1, BB_SIZE)) );
+        if(this->rhead == circ_buf_offset(this->whead, this->cbuf, 1, this->SIZE)){
+            wake_up_interruptible_sync(&this->rq);
+            result = wait_event_interruptible(this->wq, (this->rhead != circ_buf_offset(this->whead, this->cbuf, 1, this->SIZE)) );
             if( result != 0 )
                 return result;
         }
 
         //Counting this towards written would throw off the writer, so don't.
-        *bb_whead = 0;
-        bb_whead = circ_buf_offset(bb_whead, blackboard, null_term_offset, BB_SIZE);
+        *this->whead = 0;
+        this->whead = circ_buf_offset(this->whead, this->cbuf, null_term_offset, this->SIZE);
     }
-    wake_up_interruptible_sync(&bbq_read);
+    wake_up_interruptible_sync(&this->rq);
 
-    *ppos = (bb_whead-blackboard);
+    *ppos = (this->whead-this->cbuf);
     return written;
 }
 
@@ -164,21 +207,26 @@ int __init ipcdevice_init(void){
         return result;
     }
 
-    bb_rhead = bb_whead = blackboard = kmalloc(BB_SIZE, GFP_KERNEL);
-    if (blackboard == NULL){
+    result = simplexinfo_init(&pipe.a);
+    if (result ){
         unregister_chrdev(IPC_MAJOR, IPC_NAME);
-        return -ENOMEM;
+        simplexinfo_destroy(&pipe.a);
+        return result;
     }
-    blackboard[0] = 0;
+    result = simplexinfo_init(&pipe.b);
+    if (result ){
+        unregister_chrdev(IPC_MAJOR, IPC_NAME);
+        simplexinfo_destroy(&pipe.a);
+        simplexinfo_destroy(&pipe.b);
+        return result;
+    }
     return 0;
 }
 
 void __exit ipcdevice_exit(void){
     unregister_chrdev(IPC_MAJOR, IPC_NAME);
-
-    if( blackboard != NULL ){
-        kfree(blackboard);
-    }
+    simplexinfo_destroy(&pipe.a);
+    simplexinfo_destroy(&pipe.b);
 }
 
 module_init(ipcdevice_init);
