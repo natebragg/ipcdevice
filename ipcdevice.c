@@ -40,6 +40,8 @@
 #include <linux/wait.h>
 #include <asm/uaccess.h>
 
+#include "ipcdevice.h"
+
 struct simplexinfo{
     char *cbuf, *rhead, *whead;
     const int SIZE;
@@ -54,12 +56,21 @@ struct simplexinfo{
 struct duplexinfo{
     struct simplexinfo *w;
     struct simplexinfo *r;
+    long reverse;
+    long base64;
+    long rot;
 } pipea = {
     .w = &a,
     .r = &b,
+    .reverse = 0,
+    .base64 = 0,
+    .rot = 0,
 }, pipeb = {
     .w = &b,
     .r = &a,
+    .reverse = 0,
+    .base64 = 0,
+    .rot = 0,
 };
 
 unsigned int connections = 0;
@@ -71,6 +82,7 @@ int ipcdevice_open(struct inode*, struct file*);
 int ipcdevice_release(struct inode*, struct file*);
 static ssize_t ipcdevice_read(struct file*, char __user*, size_t, loff_t*);
 static ssize_t ipcdevice_write(struct file*, const char __user*, size_t, loff_t*);
+long ipcdevice_unlocked_ioctl(struct file*, unsigned int, unsigned long);
 
 inline unsigned int _min(unsigned int a, unsigned int b){
     return (a<b)?a:b;
@@ -85,6 +97,7 @@ const struct file_operations ipcdevice_fops = {
     .release = ipcdevice_release,
     .read  = ipcdevice_read,
     .write = ipcdevice_write,
+    .unlocked_ioctl = ipcdevice_unlocked_ioctl,
 };
 
 int simplexinfo_init(struct simplexinfo *this){
@@ -216,6 +229,29 @@ static ssize_t ipcdevice_write(struct file *filp, const char __user *buf,
 
     *ppos = (this->whead-this->cbuf);
     return written;
+}
+
+long ipcdevice_unlocked_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+{
+    struct duplexinfo *di = filp->private_data;
+
+    switch( cmd ){
+    case IPC_IOC_ROT13:
+        di->rot = !!arg;
+        break;
+
+    case IPC_IOC_BASE64:
+        di->base64 = !!arg;
+        break;
+
+    case IPC_IOC_REVERSE:
+        di->reverse = !!arg;
+        break;
+
+    default:
+        return -ENOTTY;
+    }
+    return 0;
 }
 
 int __init ipcdevice_init(void){

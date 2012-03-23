@@ -6,10 +6,10 @@ PWD := $(shell pwd)
 
 default: ipcdevice.ko
 
-ipcdevice.ko: ipcdevice.c
+ipcdevice.ko: ipcdevice.c ipcdevice.h
 	$(MAKE) -C $(KDIR) M=$(PWD) modules
 
-test: ipcdevice.ko test.o
+test: ipcdevice.ko test.o ipcdevice.h
 	gcc -o test test.o
 	@lsmod | grep ipcdevice > /dev/null; \
 	if [ $$? -eq 0 ]; then \
