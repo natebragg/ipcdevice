@@ -20,7 +20,8 @@ test: ipcdevice.ko test.o
 	sudo rmmod ipcdevice
 
 demo_p_c: demo_p_c.o
-	gcc -o demo_p_c demo_p_c.o
+
+demo_duplex: demo_duplex.o
 
 clean:
-	rm -f *.o *.ko *.mod.c test demo_p_c modules.order Module.symvers
+	rm -f *.o *.ko *.mod.c test demo_p_c demo_duplex modules.order Module.symvers
