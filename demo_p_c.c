@@ -21,8 +21,13 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "ipcdevice.h"
+
 #define PROC_NAME "demo_p_c"
 #define BUF_SIZE 4096
+
+int rot = 0;
+int reverse = 0;
 
 void consumer(int msg_cnt){
     FILE *ipc = NULL;
@@ -70,6 +75,11 @@ void producer(int msg_cnt, char **messages){
         return;
     }
 
+	if(reverse)
+		ioctl(fileno(ipc), IPC_IOC_REVERSE, 1);
+	if(rot)
+		ioctl(fileno(ipc), IPC_IOC_ROT13, 1);
+
     while( msg_cnt-- > 0 ){
         len = strnlen(messages[0], BUF_SIZE) + 1;
         bytes_written = fwrite(messages[0], sizeof(char), len, ipc);
@@ -80,6 +90,12 @@ void producer(int msg_cnt, char **messages){
         messages++;
         fflush(ipc);
     }
+
+	if(reverse)
+		ioctl(fileno(ipc), IPC_IOC_REVERSE, 0);
+	if(rot)
+		ioctl(fileno(ipc), IPC_IOC_ROT13, 0);
+
     fclose( ipc );
 }
 
@@ -87,19 +103,30 @@ int main(int argc, char **argv){
     int result = 0;
 
     if( argc == 1){
-        printf("USAGE: " PROC_NAME " MESSAGE_ONE [MESSAGE_TWO ...]\n");
+        printf("USAGE: " PROC_NAME " [-13] [-r]  MESSAGE_ONE [MESSAGE_TWO ...]\n");
         return 1;
     }
+	argc--;
+	argv++;
+	for(;;argc--, argv++){
+		if( !strncmp(argv[0],"-13",3) ){
+			rot = 1;
+		} else if( !strncmp(argv[0],"-r",3) ){
+			reverse = 1;
+		} else {
+			break;
+		}
+	}
 
     if( (result = fork()) == 0 ){
-        producer(argc-1, argv+1);
+        producer(argc, argv);
     } else {
         if( result == -1 ){
             //child was not created :^(
             printf( PROC_NAME ": error - child process could not be created.\n");
             return 2;
         }
-        consumer(argc-1);
+        consumer(argc);
     }
     return 0;
 }

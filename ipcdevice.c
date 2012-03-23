@@ -189,9 +189,22 @@ static ssize_t ipcdevice_write(struct file *filp, const char __user *buf,
     int result = 0;
     struct duplexinfo *di = filp->private_data;
     struct simplexinfo *this = di->w;
+    long rot = di->rot;
+    long reverse = di->reverse;
+    int incr = 1;
     const char __user *buf_curs = buf;
     char *wh_curs;
 
+    if( reverse ){
+        buf_curs = buf+count-1;
+        incr = -1;
+        if( *buf_curs == 0 ){
+            buf_curs--;
+            count--;
+            written++;
+        }
+        null_term_offset = 1;
+    }
     if (!access_ok(VERIFY_READ, buf, count))
         return -EFAULT;
     while( count > 0 ){
@@ -205,9 +218,16 @@ static ssize_t ipcdevice_write(struct file *filp, const char __user *buf,
         //we can write all the way up to rhead, circularly
         head_space = (this->SIZE + (this->rhead - this->whead) - 1) % this->SIZE;
         to_write = _min(head_space, _min(this->SIZE-(this->whead-this->cbuf), count));
-        for(wh_curs = this->whead; (wh_curs - this->whead) < to_write; ++wh_curs, ++buf_curs){
+
+        for(wh_curs = this->whead; (wh_curs - this->whead) < to_write; ++wh_curs, buf_curs+=incr){
             if(__get_user( *wh_curs, buf_curs))
                 return -EFAULT;
+            if( rot ){
+                if( *wh_curs >= 'A' && *wh_curs <= 'Z' )
+                    *wh_curs = 'A' + ((*wh_curs - 'A' + 13)%26);
+                else if( *wh_curs >= 'a' && *wh_curs <= 'z' )
+                    *wh_curs = 'a' + ((*wh_curs - 'a' + 13)%26);
+            }
         }
         this->whead = circ_buf_offset(this->whead, this->cbuf, to_write, this->SIZE);
         written += to_write;

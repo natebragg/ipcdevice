@@ -20,6 +20,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "ipcdevice.h"
+
 #define ASSERT_EQ( p1, p2 ) do{ if ((p1) != (p2)) { printf("ASSERT FAILED(%d): " # p1 " does not equal " # p2 "\n\t" # p1 " = %d\n\t" # p2 " = %d\n", __LINE__, (int)p1, (int)p2 ); result += 1; } }while(0)
 #define ASSERT_NEQ( p1, p2 ) do{ if ((p1) == (p2)) { printf("ASSERT FAILED(%d): " # p1 " equals " # p2 "\n\t" # p1 " = %d\n\t" # p2 " = %d\n", __LINE__, (int)p1, (int)p2 ); result += 1; } }while(0)
 #define ASSERT_STR_EQ( p1, p2, bsize ) do{ if ( strncmp(p1, p2, bsize) ) { printf("ASSERT FAILED(%d): " # p1 " != " # p2 "\n\t" # p1 " = %.*s\n\t" # p2 " = %.*s\n", __LINE__, bsize, p1, bsize, p2 ); result += 1; } }while(0)
@@ -90,8 +92,8 @@ int test_single_read(FILE *ipc_w, FILE *ipc_r) {
 
 int test_corpus(FILE *ipc_w, FILE *ipc_r) {
     FILE *corpus = NULL;
-    #define buf_size 1024
-    char message[buf_size] = {0,}, expected[buf_size] = {0};
+    #define BUF_SIZE 1024
+    char message[BUF_SIZE] = {0,}, expected[BUF_SIZE] = {0};
     size_t len, bytes_written, bytes_read, bytes_retrieved;
     int result = 0;
 
@@ -99,7 +101,7 @@ int test_corpus(FILE *ipc_w, FILE *ipc_r) {
     ASSERT_NEQ( corpus, NULL );
 
     do{
-        bytes_read = fread(message, sizeof(char), buf_size, corpus);
+        bytes_read = fread(message, sizeof(char), BUF_SIZE, corpus);
         bytes_written = fwrite(message, sizeof(char), bytes_read, ipc_w);
         ASSERT_EQ( bytes_written, bytes_read );
     }while( !feof( corpus ) );
@@ -107,12 +109,64 @@ int test_corpus(FILE *ipc_w, FILE *ipc_r) {
 
     rewind( corpus );
     do{
-        bytes_read = fread(expected, sizeof(char), buf_size, corpus);
-        bytes_retrieved = fread(message, sizeof(char), buf_size, ipc_r);
-        ASSERT_STR_EQ( message, expected, buf_size );
+        bytes_read = fread(expected, sizeof(char), BUF_SIZE, corpus);
+        bytes_retrieved = fread(message, sizeof(char), BUF_SIZE, ipc_r);
+        ASSERT_STR_EQ( message, expected, BUF_SIZE );
     }while( !feof( corpus ) );
 
     fclose( corpus );
+    return result;
+}
+
+int test_rot13(FILE *ipc_w, FILE *ipc_r) {
+    char *message;
+    const char *input  = "shmowzow!";
+    const char *expected = "fuzbjmbj!";
+    size_t buf_size, bytes_read;
+    size_t len, bytes_written;
+    int result = 0;
+
+    ioctl(fileno(ipc_w), IPC_IOC_ROT13, 1);
+    len = strnlen(input, buf_size) + 1;
+    bytes_written = fwrite(input, sizeof(char), len, ipc_w);
+    ASSERT_EQ( bytes_written, len );
+    fflush(ipc_w);
+    ioctl(fileno(ipc_w), IPC_IOC_ROT13, 0);
+
+    buf_size = 20;
+    message = (char*)malloc(buf_size);
+    memset(message, 0, buf_size);
+
+    bytes_read = fread(message, sizeof(char), buf_size, ipc_r);
+    ASSERT_EQ( len, bytes_read );
+    ASSERT_STR_EQ( message, expected, buf_size );
+    free( message );
+    return result;
+}
+
+int test_reverse(FILE *ipc_w, FILE *ipc_r) {
+    char *message;
+    const char *input  = "shmowzow!";
+    const char *expected = "!wozwomhs";
+    size_t buf_size, bytes_read;
+    size_t len, bytes_written;
+    int result = 0;
+
+    ioctl(fileno(ipc_w), IPC_IOC_REVERSE, 1);
+    len = strnlen(input, buf_size) + 1;
+    bytes_written = fwrite(input, sizeof(char), len, ipc_w);
+    ASSERT_EQ( bytes_written, len );
+    fflush(ipc_w);
+    ioctl(fileno(ipc_w), IPC_IOC_REVERSE, 0);
+
+    buf_size = 20;
+    message = (char*)malloc(buf_size);
+    memset(message, 0, buf_size);
+
+    bytes_read = fread(message, sizeof(char), buf_size, ipc_r);
+    ASSERT_EQ( len, bytes_read );
+    ASSERT_STR_EQ( message, expected, buf_size );
+    free( message );
     return result;
 }
 
@@ -121,5 +175,7 @@ int main(int argv, char **argc){
     result += ipc_file_fixture(test_single_read);
     result += ipc_file_fixture(test_multi_read);
     result += ipc_file_fixture(test_corpus);
+    result += ipc_file_fixture(test_rot13);
+    result += ipc_file_fixture(test_reverse);
     return result;
 }
