@@ -104,15 +104,15 @@ void simplexinfo_destroy(struct simplexinfo *this){
     }
 }
 
-int ipcdevice_open(struct inode *inode, struct file *file)
+int ipcdevice_open(struct inode *inode, struct file *filp)
 {
     switch(connections){
     case 0:
-        file->private_data = &pipea;
+        filp->private_data = &pipea;
         break;
 
     case 1:
-        file->private_data = &pipeb;
+        filp->private_data = &pipeb;
         break;
 
     default:
@@ -122,17 +122,17 @@ int ipcdevice_open(struct inode *inode, struct file *file)
     return 0;
 }
 
-int ipcdevice_release(struct inode *inode, struct file *file)
+int ipcdevice_release(struct inode *inode, struct file *filp)
 {
     connections--;
     return 0;
 }
 
-static ssize_t ipcdevice_read(struct file *file, char __user *buf,
+static ssize_t ipcdevice_read(struct file *filp, char __user *buf,
         size_t count, loff_t *ppos){
     int result;
     size_t len = 0, to_read = 0, head_space = 0, bytes_read = 0, to_bb_end = 0;
-    struct duplexinfo *di = file->private_data;
+    struct duplexinfo *di = filp->private_data;
     struct simplexinfo *this = di->r;
 
     if( this->rhead != this->whead && *this->rhead == 0 ){
@@ -169,12 +169,12 @@ static ssize_t ipcdevice_read(struct file *file, char __user *buf,
     return bytes_read;
 }
 
-static ssize_t ipcdevice_write(struct file *file, const char __user *buf,
+static ssize_t ipcdevice_write(struct file *filp, const char __user *buf,
         size_t count, loff_t *ppos){
     size_t null_term_offset = buf[count-1] == 0 ? 0 : 1;
     size_t to_write = 0, head_space = 0, written = 0;
     int result = 0;
-    struct duplexinfo *di = file->private_data;
+    struct duplexinfo *di = filp->private_data;
     struct simplexinfo *this = di->w;
 
     while( count > 0 ){
