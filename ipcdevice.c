@@ -176,7 +176,11 @@ static ssize_t ipcdevice_write(struct file *filp, const char __user *buf,
     int result = 0;
     struct duplexinfo *di = filp->private_data;
     struct simplexinfo *this = di->w;
+    const char __user *buf_curs = buf;
+    char *wh_curs;
 
+    if (!access_ok(VERIFY_READ, buf, count))
+        return -EFAULT;
     while( count > 0 ){
         if(this->rhead == circ_buf_offset(this->whead, this->cbuf, 1, this->SIZE)){
             wake_up_interruptible_sync(&this->rq);
@@ -188,7 +192,10 @@ static ssize_t ipcdevice_write(struct file *filp, const char __user *buf,
         //we can write all the way up to rhead, circularly
         head_space = (this->SIZE + (this->rhead - this->whead) - 1) % this->SIZE;
         to_write = _min(head_space, _min(this->SIZE-(this->whead-this->cbuf), count));
-        copy_from_user(this->whead, buf+written, to_write);
+        for(wh_curs = this->whead; (wh_curs - this->whead) < to_write; ++wh_curs, ++buf_curs){
+            if(__get_user( *wh_curs, buf_curs))
+                return -EFAULT;
+        }
         this->whead = circ_buf_offset(this->whead, this->cbuf, to_write, this->SIZE);
         written += to_write;
         count -= to_write;
