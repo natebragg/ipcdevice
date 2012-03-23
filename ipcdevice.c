@@ -45,21 +45,24 @@ struct simplexinfo{
     const int SIZE;
     wait_queue_head_t rq;
     wait_queue_head_t wq;
+} a = {
+    .SIZE = 1024,
+}, b = {
+    .SIZE = 1024,
 };
 
 struct duplexinfo{
-    int parties;
-    struct simplexinfo a;
-    struct simplexinfo b;
-} pipe = {
-    .parties = 0,
-    .a = {
-        .SIZE = 1024,
-        },
-    .b = {
-        .SIZE = 1024,
-        },
+    struct simplexinfo *w;
+    struct simplexinfo *r;
+} pipea = {
+    .w = &a,
+    .r = &b,
+}, pipeb = {
+    .w = &b,
+    .r = &a,
 };
+
+unsigned int connections = 0;
 
 int simplexinfo_init(struct simplexinfo*);
 void simplexinfo_destroy(struct simplexinfo*);
@@ -103,16 +106,25 @@ void simplexinfo_destroy(struct simplexinfo *this){
 
 int ipcdevice_open(struct inode *inode, struct file *file)
 {
-    if( pipe.parties > 1 )
+    switch(connections){
+    case 0:
+        file->private_data = &pipea;
+        break;
+
+    case 1:
+        file->private_data = &pipeb;
+        break;
+
+    default:
         return -EBUSY;
-    pipe.parties++;
-    file->private_data = &pipe.a;
+    }
+    connections++;
     return 0;
 }
 
 int ipcdevice_release(struct inode *inode, struct file *file)
 {
-    pipe.parties--;
+    connections--;
     return 0;
 }
 
@@ -120,7 +132,8 @@ static ssize_t ipcdevice_read(struct file *file, char __user *buf,
         size_t count, loff_t *ppos){
     int result;
     size_t len = 0, to_read = 0, head_space = 0, bytes_read = 0, to_bb_end = 0;
-    struct simplexinfo *this = file->private_data;
+    struct duplexinfo *di = file->private_data;
+    struct simplexinfo *this = di->r;
 
     if( this->rhead != this->whead && *this->rhead == 0 ){
         this->rhead = this->cbuf + ((this->rhead - this->cbuf + 1) % this->SIZE);
@@ -161,7 +174,8 @@ static ssize_t ipcdevice_write(struct file *file, const char __user *buf,
     size_t null_term_offset = buf[count-1] == 0 ? 0 : 1;
     size_t to_write = 0, head_space = 0, written = 0;
     int result = 0;
-    struct simplexinfo *this = file->private_data;
+    struct duplexinfo *di = file->private_data;
+    struct simplexinfo *this = di->w;
 
     while( count > 0 ){
         if(this->rhead == circ_buf_offset(this->whead, this->cbuf, 1, this->SIZE)){
@@ -207,17 +221,17 @@ int __init ipcdevice_init(void){
         return result;
     }
 
-    result = simplexinfo_init(&pipe.a);
+    result = simplexinfo_init(&a);
     if (result ){
         unregister_chrdev(IPC_MAJOR, IPC_NAME);
-        simplexinfo_destroy(&pipe.a);
+        simplexinfo_destroy(&a);
         return result;
     }
-    result = simplexinfo_init(&pipe.b);
+    result = simplexinfo_init(&b);
     if (result ){
         unregister_chrdev(IPC_MAJOR, IPC_NAME);
-        simplexinfo_destroy(&pipe.a);
-        simplexinfo_destroy(&pipe.b);
+        simplexinfo_destroy(&a);
+        simplexinfo_destroy(&b);
         return result;
     }
     return 0;
@@ -225,8 +239,8 @@ int __init ipcdevice_init(void){
 
 void __exit ipcdevice_exit(void){
     unregister_chrdev(IPC_MAJOR, IPC_NAME);
-    simplexinfo_destroy(&pipe.a);
-    simplexinfo_destroy(&pipe.b);
+    simplexinfo_destroy(&a);
+    simplexinfo_destroy(&b);
 }
 
 module_init(ipcdevice_init);
