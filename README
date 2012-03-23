@@ -8,3 +8,13 @@ kernel:
 1) An ioctl to ROT13 encode the message.
 2) An ioctl to base64 encode the message.
 3) An ioctl to reverse the message.
+
+----
+
+For the sake of disclosure, my references for this project include the following:
+
+http://www.freesoftwaremagazine.com/articles/drivers_linux
+http://www.xml.com/ldd/chapter/book/ch05.html
+drivers/char/generic_nvram.c (and a few others)
+http://www.makelinux.net/ldd3/chp-3-sect-4
+http://lwn.net/Articles/119652/
