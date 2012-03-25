@@ -44,13 +44,19 @@
 
 struct simplexinfo{
     char *cbuf, *rhead, *whead;
+    int message_complete;
+    size_t len_remaining;
     const int SIZE;
     wait_queue_head_t rq;
     wait_queue_head_t wq;
 } a = {
     .SIZE = 1024,
+    .message_complete = 0,
+    .len_remaining = 0,
 }, b = {
     .SIZE = 1024,
+    .message_complete = 0,
+    .len_remaining = 0,
 };
 
 struct duplexinfo{
@@ -90,6 +96,28 @@ inline unsigned int _min(unsigned int a, unsigned int b){
 
 inline char *circ_buf_offset(char *buf, char *basis, const size_t offset, const size_t size){
     return basis + ((buf - basis + offset) % size);
+}
+
+size_t circ_head_space(char *buf, char *buf2, const size_t size){
+    return (size + (buf2 - buf)) % size;
+}
+
+size_t pop_length(char **buf, char *basis, const size_t size){
+    size_t len = 0;
+    int i = 0;
+    for(;i<4;i++){
+        len += ((size_t)(*buf)[0])<<(8*i);
+        *buf = circ_buf_offset(*buf, basis, 1, size);
+    }
+    return len;
+}
+
+void put_length(char **buf, char *basis, const size_t size, size_t len){
+    int i = 0;
+    for(;i<4;i++){
+        **buf = (char)(len>>(8*i))&0xFF;
+        *buf = circ_buf_offset(*buf, basis, 1, size);
+    }
 }
 
 const struct file_operations ipcdevice_fops = {
@@ -148,9 +176,21 @@ static ssize_t ipcdevice_read(struct file *filp, char __user *buf,
     struct duplexinfo *di = filp->private_data;
     struct simplexinfo *this = di->r;
 
-    if( this->rhead != this->whead && *this->rhead == 0 ){
-        this->rhead = this->cbuf + ((this->rhead - this->cbuf + 1) % this->SIZE);
+    if( this->message_complete ){
+        this->message_complete = 0;
         return 0;
+    }
+
+    len = this->len_remaining;
+    if( len == 0 ){
+        if( circ_head_space(this->rhead, this->whead, this->SIZE) < 4){
+            wake_up_interruptible_sync(&this->wq);
+            result = wait_event_interruptible(this->rq, ( circ_head_space(this->rhead, this->whead, this->SIZE) >= 4) );
+            if( result != 0 )
+                return result;
+        }
+
+        len = pop_length(&this->rhead, this->cbuf, this->SIZE);
     }
 
     do{
@@ -162,20 +202,22 @@ static ssize_t ipcdevice_read(struct file *filp, char __user *buf,
         }
 
         //we can read all the way to whead, circularly
-        head_space = (this->SIZE + (this->whead - this->rhead)) % this->SIZE;
+        head_space = circ_head_space(this->rhead, this->whead, this->SIZE);
         to_bb_end = this->SIZE-(this->rhead-this->cbuf);
-        len = strnlen(this->rhead, _min(head_space, to_bb_end));
         to_read = _min(head_space, _min(to_bb_end, _min(len, count)));
         copy_to_user(buf+bytes_read, this->rhead, to_read);
         this->rhead = circ_buf_offset(this->rhead, this->cbuf, to_read, this->SIZE);
         bytes_read += to_read;
+        len -= to_read;
         count -= to_read;
-    }while( count > 0 && (*this->rhead != 0 || this->rhead == this->whead) );
+    }while( count > 0 && len != 0 );
 
-    if( count > 0 ){
-        *(buf+bytes_read) = 0;
-        bytes_read++;
+    if( len == 0 ){
+        this->message_complete = 1;
     }
+
+    this->len_remaining = len;
+
     wake_up_interruptible_sync(&this->wq);
 
     *ppos = (this->rhead-this->cbuf);
@@ -184,7 +226,6 @@ static ssize_t ipcdevice_read(struct file *filp, char __user *buf,
 
 static ssize_t ipcdevice_write(struct file *filp, const char __user *buf,
         size_t count, loff_t *ppos){
-    size_t null_term_offset = buf[count-1] == 0 ? 0 : 1;
     size_t to_write = 0, head_space = 0, written = 0;
     int result = 0;
     struct duplexinfo *di = filp->private_data;
@@ -195,22 +236,27 @@ static ssize_t ipcdevice_write(struct file *filp, const char __user *buf,
     const char __user *buf_curs = buf;
     char *wh_curs;
 
+    if( this->rhead != this->whead && circ_head_space(this->rhead, this->whead, this->SIZE) < 5){
+        wake_up_interruptible_sync(&this->rq);
+        result = wait_event_interruptible(this->wq,
+            ( circ_head_space(this->rhead, this->whead, this->SIZE) >= 5) );
+        if( result != 0 )
+            return result;
+    }
+
+    put_length(&this->whead, this->cbuf, this->SIZE, count);
+
     if( reverse ){
         buf_curs = buf+count-1;
         incr = -1;
-        if( *buf_curs == 0 ){
-            buf_curs--;
-            count--;
-            written++;
-        }
-        null_term_offset = 1;
     }
     if (!access_ok(VERIFY_READ, buf, count))
         return -EFAULT;
     while( count > 0 ){
-        if(this->rhead == circ_buf_offset(this->whead, this->cbuf, 1, this->SIZE)){
+        if( circ_head_space(this->whead, this->rhead, this->SIZE) == 1){
             wake_up_interruptible_sync(&this->rq);
-            result = wait_event_interruptible(this->wq, (this->rhead != circ_buf_offset(this->whead, this->cbuf, 1, this->SIZE)) );
+            result = wait_event_interruptible(this->wq,
+                ( circ_head_space(this->whead, this->rhead, this->SIZE) != 1) );
             if( result != 0 )
                 return result;
         }
@@ -233,18 +279,7 @@ static ssize_t ipcdevice_write(struct file *filp, const char __user *buf,
         written += to_write;
         count -= to_write;
     }
-    if( null_term_offset > 0){
-        if(this->rhead == circ_buf_offset(this->whead, this->cbuf, 1, this->SIZE)){
-            wake_up_interruptible_sync(&this->rq);
-            result = wait_event_interruptible(this->wq, (this->rhead != circ_buf_offset(this->whead, this->cbuf, 1, this->SIZE)) );
-            if( result != 0 )
-                return result;
-        }
 
-        //Counting this towards written would throw off the writer, so don't.
-        *this->whead = 0;
-        this->whead = circ_buf_offset(this->whead, this->cbuf, null_term_offset, this->SIZE);
-    }
     wake_up_interruptible_sync(&this->rq);
 
     *ppos = (this->whead-this->cbuf);

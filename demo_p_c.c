@@ -54,9 +54,9 @@ void consumer(int msg_cnt){
             do{
                 bytes_read = fread(message+br_total, sizeof(char), BUF_SIZE-br_total, ipc);
                 br_total += bytes_read;
-            }while( message[br_total-1] != 0 && br_total != BUF_SIZE );
+            }while( !feof(ipc) && br_total != BUF_SIZE );
             printf( "%.*s", br_total, message);
-        }while( message[br_total-1] != 0 );
+        }while( !feof(ipc) );
         printf( "'\n" );
         br_total = 0;
     } while( --msg_cnt > 0 );
@@ -81,11 +81,11 @@ void producer(int msg_cnt, char **messages){
 		ioctl(fileno(ipc), IPC_IOC_ROT13, 1);
 
     while( msg_cnt-- > 0 ){
-        len = strnlen(messages[0], BUF_SIZE) + 1;
+        len = strnlen(messages[0], BUF_SIZE);
         bytes_written = fwrite(messages[0], sizeof(char), len, ipc);
         if( bytes_written != len ){
-            printf( PROC_NAME ": trouble writing message '%s': only wrote %d"
-                " bytes.\n", messages[0], bytes_written);
+            printf( PROC_NAME ": trouble writing message '%.*s': only wrote %d"
+                " bytes.\n", len, messages[0], bytes_written);
         }
         messages++;
         fflush(ipc);

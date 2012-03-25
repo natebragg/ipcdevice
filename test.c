@@ -153,7 +153,7 @@ int test_reverse(FILE *ipc_w, FILE *ipc_r) {
     int result = 0;
 
     ioctl(fileno(ipc_w), IPC_IOC_REVERSE, 1);
-    len = strnlen(input, buf_size) + 1;
+    len = strnlen(input, buf_size);
     bytes_written = fwrite(input, sizeof(char), len, ipc_w);
     ASSERT_EQ( bytes_written, len );
     fflush(ipc_w);
@@ -165,7 +165,7 @@ int test_reverse(FILE *ipc_w, FILE *ipc_r) {
 
     bytes_read = fread(message, sizeof(char), buf_size, ipc_r);
     ASSERT_EQ( len, bytes_read );
-    ASSERT_STR_EQ( message, expected, buf_size );
+    ASSERT_STR_EQ( message, expected, bytes_read );
     free( message );
     return result;
 }
