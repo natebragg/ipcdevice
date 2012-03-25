@@ -41,6 +41,7 @@
 #include <asm/uaccess.h>
 
 #include "ipcdevice.h"
+#include "base64.h"
 
 struct simplexinfo{
     char *cbuf, *rhead, *whead;
@@ -106,7 +107,7 @@ size_t pop_length(char **buf, char *basis, const size_t size){
     size_t len = 0;
     int i = 0;
     for(;i<4;i++){
-        len += ((size_t)(*buf)[0])<<(8*i);
+        len += ((*buf)[0]&0xFF)<<(8*i);
         *buf = circ_buf_offset(*buf, basis, 1, size);
     }
     return len;
@@ -226,16 +227,21 @@ static ssize_t ipcdevice_read(struct file *filp, char __user *buf,
 
 static ssize_t ipcdevice_write(struct file *filp, const char __user *buf,
         size_t count, loff_t *ppos){
-    size_t to_write = 0, head_space = 0, written = 0;
+    size_t chunks_to_write = 0, head_space = 0, written = 0;
     int result = 0;
     struct duplexinfo *di = filp->private_data;
     struct simplexinfo *this = di->w;
     long rot = di->rot;
     long reverse = di->reverse;
+    long base64 = di->base64;
     int incr = 1;
     const char __user *buf_curs = buf;
     char *wh_curs;
-    char cur_char;
+    char cur_char = 0;
+    int in_chunk_size = 1, out_chunk_size = 1;
+    int in_chunk_iter;
+    size_t output_length = count;
+    union base64_translator trans;
 
     if( this->rhead != this->whead && circ_head_space(this->whead, this->rhead, this->SIZE) < 5){
         wake_up_interruptible_sync(&this->rq);
@@ -245,7 +251,15 @@ static ssize_t ipcdevice_write(struct file *filp, const char __user *buf,
             return result;
     }
 
-    put_length(&this->whead, this->cbuf, this->SIZE, count);
+    if( base64 ){
+        in_chunk_size = 3;
+        out_chunk_size = 4;
+        output_length = (count/in_chunk_size + !!(count%in_chunk_size))*out_chunk_size;
+        if( output_length < count ) // output_length will overflow if count > 3GB
+            return -EFAULT;
+    }
+
+    put_length(&this->whead, this->cbuf, this->SIZE, output_length);
 
     if( reverse ){
         buf_curs = buf+count-1;
@@ -254,32 +268,47 @@ static ssize_t ipcdevice_write(struct file *filp, const char __user *buf,
     if (!access_ok(VERIFY_READ, buf, count))
         return -EFAULT;
     while( count > 0 ){
-        if( this->rhead != this->whead && circ_head_space(this->whead, this->rhead, this->SIZE) <= 1){
+        if( this->rhead != this->whead && circ_head_space(this->whead, this->rhead, this->SIZE) <= out_chunk_size){
             wake_up_interruptible_sync(&this->rq);
             result = wait_event_interruptible(this->wq,
-                ( this->rhead == this->whead || circ_head_space(this->whead, this->rhead, this->SIZE) > 1) );
+                ( this->rhead == this->whead || circ_head_space(this->whead, this->rhead, this->SIZE) > out_chunk_size) );
             if( result != 0 )
                 return result;
         }
 
         //we can write all the way up to rhead, circularly
         head_space = (this->SIZE + (this->rhead - this->whead) - 1) % this->SIZE;
-        to_write = _min(head_space, _min(this->SIZE-(this->whead-this->cbuf), count));
+        chunks_to_write = _min( head_space/out_chunk_size, output_length/out_chunk_size );
 
-        for(wh_curs = this->whead; (wh_curs - this->whead) < to_write; ++wh_curs, buf_curs+=incr){
-            if(__get_user( cur_char, buf_curs))
-                return -EFAULT;
-            if( rot ){
-                if( cur_char >= 'A' && cur_char <= 'Z' )
-                    cur_char = 'A' + ((cur_char - 'A' + 13)%26);
-                else if( cur_char >= 'a' && cur_char <= 'z' )
-                    cur_char = 'a' + ((cur_char - 'a' + 13)%26);
+        for(wh_curs = this->whead; circ_head_space(this->whead, wh_curs, this->SIZE) < chunks_to_write*out_chunk_size; output_length-=out_chunk_size){
+            for(in_chunk_iter = in_chunk_size-1; in_chunk_iter >= 0 && count != 0; --in_chunk_iter, buf_curs+=incr, --count, ++written){
+                if(__get_user( cur_char, buf_curs))
+                    return -EFAULT;
+                if( rot ){
+                    if( cur_char >= 'A' && cur_char <= 'Z' )
+                        cur_char = 'A' + ((cur_char - 'A' + 13)%26);
+                    else if( cur_char >= 'a' && cur_char <= 'z' )
+                        cur_char = 'a' + ((cur_char - 'a' + 13)%26);
+                }
+                if( base64 ){
+                    trans.input[in_chunk_iter] = cur_char;
+                }
             }
-            *wh_curs = cur_char;
+            if( base64 ){
+                *(wh_curs+0) = base64_table[trans.f1];
+                *(wh_curs+1) = base64_table[trans.f2];
+                *(wh_curs+2) = base64_table[trans.f3];
+                *(wh_curs+3) = base64_table[trans.f4];
+                trans.input[0] = trans.input[1] = trans.input[2] = 0;
+                for(; in_chunk_iter >= 0; --in_chunk_iter){
+                    *(wh_curs+3-in_chunk_iter) = '=';
+                }
+            } else {
+                *wh_curs = cur_char;
+            }
+            wh_curs = circ_buf_offset(wh_curs, this->cbuf, out_chunk_size, this->SIZE);
         }
-        this->whead = circ_buf_offset(this->whead, this->cbuf, to_write, this->SIZE);
-        written += to_write;
-        count -= to_write;
+        this->whead = wh_curs;
     }
 
     wake_up_interruptible_sync(&this->rq);

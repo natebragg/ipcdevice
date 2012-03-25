@@ -28,6 +28,7 @@
 
 int rot = 0;
 int reverse = 0;
+int base64 = 0;
 
 void consumer(int msg_cnt){
     FILE *ipc = NULL;
@@ -79,6 +80,8 @@ void producer(int msg_cnt, char **messages){
 		ioctl(fileno(ipc), IPC_IOC_REVERSE, 1);
 	if(rot)
 		ioctl(fileno(ipc), IPC_IOC_ROT13, 1);
+	if(base64)
+		ioctl(fileno(ipc), IPC_IOC_BASE64, 1);
 
     while( msg_cnt-- > 0 ){
         len = strnlen(messages[0], BUF_SIZE);
@@ -95,6 +98,8 @@ void producer(int msg_cnt, char **messages){
 		ioctl(fileno(ipc), IPC_IOC_REVERSE, 0);
 	if(rot)
 		ioctl(fileno(ipc), IPC_IOC_ROT13, 0);
+	if(base64)
+		ioctl(fileno(ipc), IPC_IOC_BASE64, 0);
 
     fclose( ipc );
 }
@@ -103,14 +108,16 @@ int main(int argc, char **argv){
     int result = 0;
 
     if( argc == 1){
-        printf("USAGE: " PROC_NAME " [-13] [-r]  MESSAGE_ONE [MESSAGE_TWO ...]\n");
+        printf("USAGE: " PROC_NAME " [-13] [-64] [-r] MESSAGE_ONE [MESSAGE_TWO ...]\n");
         return 1;
     }
 	argc--;
 	argv++;
-	for(;;argc--, argv++){
+	for(;argc;argc--, argv++){
 		if( !strncmp(argv[0],"-13",3) ){
 			rot = 1;
+		} else if( !strncmp(argv[0],"-64",3) ){
+			base64 = 1;
 		} else if( !strncmp(argv[0],"-r",3) ){
 			reverse = 1;
 		} else {

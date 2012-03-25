@@ -6,7 +6,7 @@ PWD := $(shell pwd)
 
 default: ipcdevice.ko
 
-ipcdevice.ko: ipcdevice.c ipcdevice.h
+ipcdevice.ko: ipcdevice.c ipcdevice.h base64.h
 	$(MAKE) -C $(KDIR) M=$(PWD) modules
 
 test: ipcdevice.ko test.o ipcdevice.h
