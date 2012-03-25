@@ -235,6 +235,7 @@ static ssize_t ipcdevice_write(struct file *filp, const char __user *buf,
     int incr = 1;
     const char __user *buf_curs = buf;
     char *wh_curs;
+    char cur_char;
 
     if( this->rhead != this->whead && circ_head_space(this->rhead, this->whead, this->SIZE) < 5){
         wake_up_interruptible_sync(&this->rq);
@@ -266,14 +267,15 @@ static ssize_t ipcdevice_write(struct file *filp, const char __user *buf,
         to_write = _min(head_space, _min(this->SIZE-(this->whead-this->cbuf), count));
 
         for(wh_curs = this->whead; (wh_curs - this->whead) < to_write; ++wh_curs, buf_curs+=incr){
-            if(__get_user( *wh_curs, buf_curs))
+            if(__get_user( cur_char, buf_curs))
                 return -EFAULT;
             if( rot ){
-                if( *wh_curs >= 'A' && *wh_curs <= 'Z' )
-                    *wh_curs = 'A' + ((*wh_curs - 'A' + 13)%26);
-                else if( *wh_curs >= 'a' && *wh_curs <= 'z' )
-                    *wh_curs = 'a' + ((*wh_curs - 'a' + 13)%26);
+                if( cur_char >= 'A' && cur_char <= 'Z' )
+                    cur_char = 'A' + ((cur_char - 'A' + 13)%26);
+                else if( cur_char >= 'a' && cur_char <= 'z' )
+                    cur_char = 'a' + ((cur_char - 'a' + 13)%26);
             }
+            *wh_curs = cur_char;
         }
         this->whead = circ_buf_offset(this->whead, this->cbuf, to_write, this->SIZE);
         written += to_write;
