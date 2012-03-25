@@ -237,7 +237,7 @@ static ssize_t ipcdevice_write(struct file *filp, const char __user *buf,
     char *wh_curs;
     char cur_char;
 
-    if( this->rhead != this->whead && circ_head_space(this->rhead, this->whead, this->SIZE) < 5){
+    if( this->rhead != this->whead && circ_head_space(this->whead, this->rhead, this->SIZE) < 5){
         wake_up_interruptible_sync(&this->rq);
         result = wait_event_interruptible(this->wq,
             ( circ_head_space(this->rhead, this->whead, this->SIZE) >= 5) );
@@ -254,10 +254,10 @@ static ssize_t ipcdevice_write(struct file *filp, const char __user *buf,
     if (!access_ok(VERIFY_READ, buf, count))
         return -EFAULT;
     while( count > 0 ){
-        if( circ_head_space(this->whead, this->rhead, this->SIZE) == 1){
+        if( this->rhead != this->whead && circ_head_space(this->whead, this->rhead, this->SIZE) <= 1){
             wake_up_interruptible_sync(&this->rq);
             result = wait_event_interruptible(this->wq,
-                ( circ_head_space(this->whead, this->rhead, this->SIZE) != 1) );
+                ( this->rhead == this->whead || circ_head_space(this->whead, this->rhead, this->SIZE) > 1) );
             if( result != 0 )
                 return result;
         }
