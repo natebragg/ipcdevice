@@ -150,6 +150,12 @@ int ipcdevice_open(struct inode *inode, struct file *filp)
 {
     switch(connections){
     case 0:
+        a.message_complete = 0;
+        a.len_remaining = 0;
+        a.whead = a.rhead = a.cbuf;
+        b.message_complete = 0;
+        b.len_remaining = 0;
+        b.whead = b.rhead = b.cbuf;
         filp->private_data = &pipea;
         break;
 
