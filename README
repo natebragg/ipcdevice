@@ -15,7 +15,21 @@ For the sake of disclosure, my references for this project include the following
 
 http://www.freesoftwaremagazine.com/articles/drivers_linux
 http://www.xml.com/ldd/chapter/book/ch05.html
-drivers/char/generic_nvram.c (and a few others)
+drivers/char/generic_nvram.c, drivers/char/raw.c (and a few others)
 Documentation/ioctl/ioctl-number.txt
 http://www.makelinux.net/ldd3/chp-3-sect-4
 http://lwn.net/Articles/119652/
+
+----
+
+To use:
+
+make
+make demo_p_c
+make demo_duplex
+insmod ipcdevice.ko
+./demo_p_c -f corpora/lipsum_biggest
+./demo_duplex $(cat corpora/lipsum_small)
+# to test the IOCTLs, use any combination of -13, -r and -64:
+./demo_p_c -13 -f corpora/lipsum_small
+rmmod ipcdevice

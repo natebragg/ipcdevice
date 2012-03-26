@@ -16,23 +16,17 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  *
- * For first use (as a superuser):
  *
- * mknod /dev/ipcdevice c 42 0
- * chmod 666 /dev/ipcdevice
- *
- * Afterwards, to use:
- *
- * insmod ipcdevice.ko
- * echo some text > /dev/ipcdevice
- * cat /dev/ipcdevice
- * rmmod ipcdevice
+ * For usage instructions, see README
  */
+
 #define IPC_MAJOR 42
 #define IPC_NAME "ipcdevice"
 
 #include <linux/module.h>
 
+#include <linux/cdev.h>
+#include <linux/device.h>
 #include <linux/init.h>
 #include <linux/fs.h>
 #include <linux/slab.h>
@@ -81,6 +75,9 @@ struct duplexinfo{
 };
 
 unsigned int connections = 0;
+static struct cdev ipc_cdev;
+static struct class *ipc_class;
+static struct device *ipc_dev;
 
 int simplexinfo_init(struct simplexinfo*);
 void simplexinfo_destroy(struct simplexinfo*);
@@ -122,6 +119,7 @@ void put_length(char **buf, char *basis, const size_t size, size_t len){
 }
 
 const struct file_operations ipcdevice_fops = {
+    .owner = THIS_MODULE,
     .open  = ipcdevice_open,
     .release = ipcdevice_release,
     .read  = ipcdevice_read,
@@ -349,31 +347,60 @@ long ipcdevice_unlocked_ioctl(struct file *filp, unsigned int cmd, unsigned long
 int __init ipcdevice_init(void){
     int result;
     printk( KERN_INFO "ipcdevice: installing module\n");
-    result = register_chrdev(IPC_MAJOR, IPC_NAME, &ipcdevice_fops);
+
+    result = simplexinfo_init(&a);
+    if( result ){
+        printk( KERN_ERR "ipcdevice: error initializing simplex info.\n" );
+        goto teardown_sia;
+    }
+
+    result = simplexinfo_init(&b);
+    if( result ){
+        printk( KERN_ERR "ipcdevice: error initializing simplex info.\n" );
+        goto teardown_sib;
+    }
+
+    cdev_init(&ipc_cdev, &ipcdevice_fops);
+    ipc_cdev.owner = THIS_MODULE;
+    result = cdev_add(&ipc_cdev, MKDEV(IPC_MAJOR, 0), 1);
     if( result < 0 ){
         printk( KERN_ERR "ipcdevice: error registering major number %d\n",
             IPC_MAJOR );
-        return result;
+        goto teardown_sib;
     }
 
-    result = simplexinfo_init(&a);
-    if (result ){
-        unregister_chrdev(IPC_MAJOR, IPC_NAME);
-        simplexinfo_destroy(&a);
-        return result;
+    ipc_class = class_create(THIS_MODULE, IPC_NAME);
+    if( IS_ERR(ipc_class) ){
+        printk( KERN_ERR "ipcdevice: error creating ipc class.\n");
+        result = PTR_ERR(ipc_class);
+        goto teardown_cdev;
     }
-    result = simplexinfo_init(&b);
-    if (result ){
-        unregister_chrdev(IPC_MAJOR, IPC_NAME);
-        simplexinfo_destroy(&a);
-        simplexinfo_destroy(&b);
-        return result;
+
+    ipc_dev = device_create(ipc_class, NULL, MKDEV(IPC_MAJOR, 0), NULL, IPC_NAME);
+    if( IS_ERR(ipc_dev) ){
+        printk( KERN_ERR "ipcdevice: error creating ipc device.\n");
+        result = PTR_ERR(ipc_class);
+        goto teardown_class;
     }
+
+    printk( KERN_INFO "ipcdevice: module installed.\n");
     return 0;
+
+teardown_class:
+    class_destroy(ipc_class);
+teardown_cdev:
+    cdev_del(&ipc_cdev);
+teardown_sib:
+    simplexinfo_destroy(&b);
+teardown_sia:
+    simplexinfo_destroy(&a);
+    return result;
 }
 
 void __exit ipcdevice_exit(void){
-    unregister_chrdev(IPC_MAJOR, IPC_NAME);
+    device_destroy( ipc_class, MKDEV(IPC_MAJOR, 0) );
+    class_destroy( ipc_class );
+    cdev_del(&ipc_cdev);
     simplexinfo_destroy(&a);
     simplexinfo_destroy(&b);
 }
