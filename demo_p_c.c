@@ -80,21 +80,21 @@ void producer(int msg_cnt, char **messages){
         return;
     }
 
-	if(reverse)
-		ioctl(fileno(ipc), IPC_IOC_REVERSE, 1);
-	if(rot)
-		ioctl(fileno(ipc), IPC_IOC_ROT13, 1);
-	if(base64)
-		ioctl(fileno(ipc), IPC_IOC_BASE64, 1);
+    if(reverse)
+        ioctl(fileno(ipc), IPC_IOC_REVERSE, 1);
+    if(rot)
+        ioctl(fileno(ipc), IPC_IOC_ROT13, 1);
+    if(base64)
+        ioctl(fileno(ipc), IPC_IOC_BASE64, 1);
 
-	if(filename){
-		corpus = fopen(filename, "r");
-		fseek(corpus, 0L, SEEK_END);
-		corpus_length = ftell(corpus);
-		rewind(corpus);
+    if(filename){
+        corpus = fopen(filename, "r");
+        fseek(corpus, 0L, SEEK_END);
+        corpus_length = ftell(corpus);
+        rewind(corpus);
         corpus_body = malloc(corpus_length);
         len = fread(corpus_body, sizeof(char), corpus_length, corpus);
-		setvbuf(ipc, NULL, _IONBF, 0);
+        setvbuf(ipc, NULL, _IONBF, 0);
         bytes_written = fwrite(corpus_body, sizeof(char), len, ipc);
         if( bytes_written != len ){
             printf( PROC_NAME ": trouble writing message '%.*s': only wrote %d"
@@ -102,7 +102,7 @@ void producer(int msg_cnt, char **messages){
         }
         fflush(ipc);
         free(corpus_body);
-	}
+    }
     while( !filename && msg_cnt-- > 0 ){
         len = strnlen(messages[0], BUF_SIZE);
         bytes_written = fwrite(messages[0], sizeof(char), len, ipc);
@@ -114,12 +114,12 @@ void producer(int msg_cnt, char **messages){
         fflush(ipc);
     }
 
-	if(reverse)
-		ioctl(fileno(ipc), IPC_IOC_REVERSE, 0);
-	if(rot)
-		ioctl(fileno(ipc), IPC_IOC_ROT13, 0);
-	if(base64)
-		ioctl(fileno(ipc), IPC_IOC_BASE64, 0);
+    if(reverse)
+        ioctl(fileno(ipc), IPC_IOC_REVERSE, 0);
+    if(rot)
+        ioctl(fileno(ipc), IPC_IOC_ROT13, 0);
+    if(base64)
+        ioctl(fileno(ipc), IPC_IOC_BASE64, 0);
 
     fclose( ipc );
 }
@@ -131,25 +131,25 @@ int main(int argc, char **argv){
         printf("USAGE: " PROC_NAME " [-13] [-64] [-r] <[-f filename]|MESSAGE_ONE [MESSAGE_TWO ...]>\n");
         return 1;
     }
-	argc--;
-	argv++;
-	for(;argc;argc--, argv++){
-		if( !strncmp(argv[0],"-13",3) ){
-			rot = 1;
-		} else if( !strncmp(argv[0],"-64",3) ){
-			base64 = 1;
-		} else if( !strncmp(argv[0],"-r",3) ){
-			reverse = 1;
-		} else if( !strncmp(argv[0],"-f",2) ){
-			if( argc == 1 )
-				printf( PROC_NAME ": -f must be followed by filename\n" );
-			filename = argv[1];
-			argc--;
-			argv++;
-		} else {
-			break;
-		}
-	}
+    argc--;
+    argv++;
+    for(;argc;argc--, argv++){
+        if( !strncmp(argv[0],"-13",3) ){
+            rot = 1;
+        } else if( !strncmp(argv[0],"-64",3) ){
+            base64 = 1;
+        } else if( !strncmp(argv[0],"-r",3) ){
+            reverse = 1;
+        } else if( !strncmp(argv[0],"-f",2) ){
+            if( argc == 1 )
+                printf( PROC_NAME ": -f must be followed by filename\n" );
+            filename = argv[1];
+            argc--;
+            argv++;
+        } else {
+            break;
+        }
+    }
 
     if( (result = fork()) == 0 ){
         producer(argc, argv);
