@@ -22,6 +22,10 @@ http://lwn.net/Articles/119652/
 
 ----
 
+Before first use, add a udev rule - something like this:
+
+echo "KERNEL==\"ipcdevice\",    MODE:=\"666\"" > /etc/udev/rules.d/99-ipcdevice.rules
+
 To use:
 
 make
